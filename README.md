@@ -1,6 +1,8 @@
-Code for the preprint:
+Code for the preprint: 
 
-COMING SOMEDAY
+Alexander Okamoto,  Clarissa Coveney, Danalaxshmi S Ganapathee, & Terence Capellini. Massively parallel functional screen identifies thousands of regulatory differences in human versus chimpanzee postcranial skeletal development
+
+COMING SOON
 
 Initial processing of the sequencing data was performed on the Harvard FAS computing cluster. Other parts of this script were written for a smaller, internal lab computing cluster. It may not work on a personal computer.
 
