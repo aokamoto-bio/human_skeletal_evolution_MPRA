@@ -1,0 +1,448 @@
+---
+title: "Autopod MRPA Design"
+author: "Alexander Okamoto"
+date: "2023-11-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load Packages
+
+```{r, message = F}
+library(stringr) #for manipulating string objects
+library(tidyverse) #for data manipulation and plotting
+library(knitr) #for knitting html with better options
+library(data.table) #for datatable manipulation
+library(GenomicRanges) #for manipulating genomic regions
+library(BSgenome.Hsapiens.UCSC.hg38) #genomic seqs for extracting  human DNA sequence for regions
+library(BSgenome.Ptroglodytes.UCSC.panTro6) #genomic seqs for extracting chimp DNA sequence for regions
+library(GenomicFeatures) #for extracting DNA sequence for regions
+```
+
+### Introduction
+The Capellini Lab has generated ATAC-seq data on most of the postcranial skeleton during the cartilage development stage. We want to design an MPRA library to test all these regions for differential regulatory activity in human and chimp. 
+
+### Preprocessing ATAC-seq files
+Many of the previously generated ATAC-seq files from the Capellini lab are narrowPeak files or aligned to hg19. These sets need to be sorted, converted to beds, and liftovered to hg38 as necessary to ensure uniformity in the datasets regarding genome and file type.
+
+```{bash, eval = F}
+#mkdir /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets
+
+/Users/alexanderokamoto/Desktop/Polymorphisms\ Project/LiftOver/liftOver E67_long_bones_merge_IDR_0.05_brain_filtered_hg19.bed /Users/alexanderokamoto/Desktop/Polymorphisms\ Project/LiftOver/Chains/hg19ToHg38.over.chain E67_long_bones_merge_IDR_0.05_brain_filtered_hg38.bed E67_long_bones_merge_IDR_0.05_brain_filtered_unmapped_to_hg38.bed 
+
+/Users/alexanderokamoto/Desktop/Polymorphisms\ Project/LiftOver/liftOver E54_long_bones_merge_IDR_0.05_brain_filtered_hg19.bed /Users/alexanderokamoto/Desktop/Polymorphisms\ Project/LiftOver/Chains/hg19ToHg38.over.chain E54_long_bones_merge_IDR_0.05_brain_filtered_hg38.bed E54_long_bones_merge_IDR_0.05_brain_filtered_unmapped_to_hg38.bed 
+
+#these are in hg19 so need to be lifted over. Samples are E72, E72, & E74.
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}'  /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/LUMBAR_IDR_threshold0.05.narrowPeak | sort -k 1,1 -k2,2n > /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/LUMBAR_IDR_threshold0.05_hg19.bed
+
+/Users/alexanderokamoto/Desktop/Polymorphisms\ Project/LiftOver/liftOver /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/LUMBAR_IDR_threshold0.05_hg19.bed /Users/alexanderokamoto/Desktop/Polymorphisms\ Project/LiftOver/Chains/hg19ToHg38.over.chain /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/LUMBAR_IDR_threshold0.05_hg38.bed /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/LUMBAR_IDR_threshold0.05_unmapped_to_hg38.bed 
+
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}' /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/LUMBAR_IDR_threshold0.05_hg38.bed | sort -k 1,1 -k2,2n > /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/LUMBAR_IDR_threshold0.05_hg38.bed
+
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}'  /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/THORACIC_IDR_threshold0.05.narrowPeak | sort -k 1,1 -k2,2n > /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/THORACIC_IDR_threshold0.05_hg19.bed
+
+/Users/alexanderokamoto/Desktop/Polymorphisms\ Project/LiftOver/liftOver /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/THORACIC_IDR_threshold0.05_hg19.bed /Users/alexanderokamoto/Desktop/Polymorphisms\ Project/LiftOver/Chains/hg19ToHg38.over.chain /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/THORACIC_IDR_threshold0.05_hg38.bed /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/THORACIC_IDR_threshold0.05_unmapped_to_hg38.bed 
+
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}' /Users/alexanderokamoto/Desktop/LDSC_Test/Vert_Col_IDR_Peaks/THORACIC_IDR_threshold0.05_hg38.bed | sort -k 1,1 -k2,2n > /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/THORACIC_IDR_threshold0.05_hg38.bed
+
+#for cat to work, all sets must have same number of columns (so 3 for now)
+#now fix other sets 
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}' /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/Long_Bone_Peaks/E54_brain_filtered_ATAC/E54_long_bones_merge_IDR_0.05_brain_filtered_hg38.bed | sort -k 1,1 -k2,2n > /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/E54_long_bones_merge_IDR_0.05_brain_filtered_hg38.bed
+
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}' /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/Long_Bone_Peaks/E67_brain_filtered_ATAC/E67_long_bones_merge_IDR_0.05_brain_filtered_hg38.bed | sort -k 1,1 -k2,2n > /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/E67_long_bones_merge_IDR_0.05_brain_filtered_hg38.bed
+
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}' ~/Desktop/Capellini_Lab/Human_ATAC/Human_Autopod_IDR_peaks/Brain_Filtered/human_all_merge_IDR_0.05_brain_filtered.bed | sort -k 1,1 -k2,2n > /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/human_all_merge_IDR_0.05_brain_filtered.bed
+
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}' /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/Mariel_Paper_Pelvis_Sets/human_E54_pelvis_peaks_hg38.bed | sort -k 1,1 -k2,2n > /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/human_E54_pelvis_peaks_hg38.bed
+
+#mariel datasets
+#run these commands from the local directories 
+cat Acetabulum_merge.bam_shift_summits.bed Pubis_merge.bam_shift_summits.bed Ilium_merge.bam_shift_summits.bed Ischium_merge.bam_shift_summits.bed | sort -k 1,1 -k2,2n | bedtools merge -i stdin > E67_pelvis_merged_IDR_0.05_hg19.bed
+cat HeadNeck_merge.bam_shift_summits.bed Blade_merge.bam_shift_summits.bed Acromion_merge.bam_shift_summits.bed | sort -k 1,1 -k2,2n | bedtools merge -i stdin > E67_scapula_merged_IDR_0.05_hg19.bed
+
+#process newly generated narrowPeak files of Mariel's data
+for sample in Acromion HeadNeck Blade
+do
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}' ${sample}_early_pooled_peaks_replicate_consolidated_IDR_threshold0.05.narrowPeak | sort -k 1,1 -k2,2n | bedtools subtract -a stdin -b /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/Brain_ATAC_Files/human_brain_E54_peaks_hg38.bed -A | sort -k 1,1 -k2,2n > Brain_Filtered/${sample}_E54_IDR_0.05_brain_filtered_hg38.bed
+done
+
+for sample in Acromion HeadNeck Blade Acetabulum Ischium Pubis Ilium
+do 
+awk -F '\t' 'OFS="\t" {print $1, $2, $3}' ${sample}_late_pooled_peaks_replicate_consolidated_IDR_threshold0.05.narrowPeak | sort -k 1,1 -k2,2n | bedtools subtract -a stdin -b /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/Brain_ATAC_Files/human_brain_E54_peaks_hg38.bed -A | sort -k 1,1 -k2,2n > Brain_Filtered/${sample}_E67_IDR_0.05_brain_filtered_hg38.bed
+done
+
+#now from brain filtered folder
+cat Acetabulum_E67_IDR_0.05_brain_filtered_hg38.bed Pubis_E67_IDR_0.05_brain_filtered_hg38.bed Ilium_E67_IDR_0.05_brain_filtered_hg38.bed Ischium_E67_IDR_0.05_brain_filtered_hg38.bed | sort -k 1,1 -k2,2n | bedtools merge -i stdin > Pelvis_merged_E67_IDR_0.05_brain_filtered_hg38.bed
+cat HeadNeck_E67_IDR_0.05_brain_filtered_hg38.bed Acromion_E67_IDR_0.05_brain_filtered_hg38.bed Blade_E67_IDR_0.05_brain_filtered_hg38.bed| sort -k 1,1 -k2,2n | bedtools merge -i stdin > Scapula_merged_E67_IDR_0.05_brain_filtered_hg38.bed
+cat Blade_E54_IDR_0.05_brain_filtered_hg38.bed Acromion_E54_IDR_0.05_brain_filtered_hg38.bed HeadNeck_E54_IDR_0.05_brain_filtered_hg38.bed | sort -k 1,1 -k2,2n | bedtools merge -i stdin > Scapula_merged_E54_IDR_0.05_brain_filtered_hg38.bed
+```
+
+### Collecting Datasets
+
+```{r}
+#Autopod data
+#count human peaks 
+autopod_data <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/human_all_merge_IDR_0.05_brain_filtered.bed"
+
+#Vertebral column data
+#note: not brain filtered, E70s
+lumbar <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/LUMBAR_IDR_threshold0.05_hg38.bed"
+thoracic <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/THORACIC_IDR_threshold0.05_hg38.bed"
+
+#Pelvis data
+#from Young et al. Science Advances 2022
+E54_pelvis <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/human_E54_pelvis_peaks_hg38.bed"
+E67_pelvis <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/Mariel_Unpublished_Peak_Sets/Brain_Filtered/Pelvis_merged_E67_IDR_0.05_brain_filtered_hg38.bed"
+
+#Scapula data
+E54_scapula <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/Mariel_Unpublished_Peak_Sets/Brain_Filtered/Scapula_merged_E54_IDR_0.05_brain_filtered_hg38.bed"
+E67_scapula <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/Mariel_Unpublished_Peak_Sets/Brain_Filtered/Scapula_merged_E67_IDR_0.05_brain_filtered_hg38.bed"
+
+#Long bone data (limbs)
+#both from Richard et al. Cell 2021
+E54_long_bone <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/E54_long_bones_merge_IDR_0.05_brain_filtered_hg38.bed"
+E67_long_bone <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/E67_long_bones_merge_IDR_0.05_brain_filtered_hg38.bed"
+
+#brain data
+#from Richard et al. Cell 2021 
+brain <- "/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/Brain_ATAC_Files/human_brain_E54_peaks_hg38.bed"
+```
+
+### STEP 1: IDENTIFY REGIONS
+Combine files, filter by brain, and perform overlaps with regions with human-specific sequence properties. 
+
+```{r}
+#this filters just by brain as is standard for our lab
+total_n_peaks <- system(paste("cat", autopod_data, lumbar, thoracic, E54_long_bone, E67_long_bone, E54_pelvis,  E67_pelvis, E54_scapula, E67_scapula, "| sort -k 1,1 -k2,2n | bedtools merge -i stdin | bedtools subtract -a stdin -b", brain, "-A |  wc -l", sep = " "), intern = T) %>% readr::parse_number()
+
+#calculate total number of base pairs (bp) covered by these regions
+total_bps <-  system(paste("cat", autopod_data, lumbar, thoracic, E54_long_bone, E67_long_bone, E54_pelvis,  E67_pelvis, E54_scapula, E67_scapula, "| sort -k 1,1 -k2,2n | bedtools merge -i stdin | bedtools subtract -a stdin -b", brain, "-A | awk -F'\t' 'BEGIN{SUM=0}{ SUM+=$3-$2 }END{print SUM}'", sep = " "), intern = T) %>% readr::parse_number()
+```
+
+Altogether, we identified 70,905 regulatory regions in the developing human skeleton at the cartilage stage.These regions span 155 million bps, for an average (mean) element length of 2,835 bps. 
+
+### STEP 2: CENTER REGIONS AND GENERATE TILES OF DESIRED LENGTH
+```{r}
+#length of sequences to test without adapter sequence
+oligo_length <- 270 
+#number of tiles
+n_tiles <- 2
+
+#determine standardized size of regulatory elements
+print(paste("Regulary elements standardized to", oligo_length*n_tiles, "base pairs."))
+
+#create supermerged bed file
+#system(paste("cat", autopod_data, lumbar, thoracic, E54_long_bone, E67_long_bone, E54_pelvis,  E67_pelvis, E54_scapula, E67_scapula, "| sort -k 1,1 -k2,2n | bedtools merge -i stdin | bedtools subtract -a stdin -b", brain, "-A  > /Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/All_Capellini_merged_IDR_threshold0.05_hg38.bed", sep = " "), intern = F)
+
+#load data in bed files
+cartilage_regions = read.table(file.path('/Users/alexanderokamoto/Desktop/Capellini_Lab/Capellini_Lab_Peak_Sets/All_Capellini_Sets/All_Capellini_merged_IDR_threshold0.05_hg38.bed'), header=F)
+colnames(cartilage_regions) <- c("chr", "start", "end")
+```
+
+### STEP 3: RETRIEVE DNA SEQUENCE OF REGIONS
+
+```{r}
+# convert the peaks into a GRanges object
+cartilage_regions <- cartilage_regions %>% dplyr::filter(chr %in% c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) %>% makeGRangesFromDataFrame(keep.extra.columns = TRUE)
+#create tiles of desired length
+cartilage_regions_centers = resize(cartilage_regions, width = oligo_length*n_tiles, fix = 'center')
+cartilage_regions_tile1 <- resize(cartilage_regions_centers, width = oligo_length, fix = 'start')
+cartilage_regions_tile2 <- resize(cartilage_regions_centers, width = oligo_length, fix = 'end')
+
+#concatenate tiles
+cartilage_regions_tiled <- c(cartilage_regions_tile1, cartilage_regions_tile2)
+
+#create dataframe and add labels
+cartilage_regions_tiled_df <- as.data.frame(cartilage_regions_tiled)
+cartilage_regions_tiled_df$tile <- c(rep("1", length(cartilage_regions_tile1)), rep("2", length(cartilage_regions_tile2)))
+cartilage_regions_tiled_df$region_start <- rep(as.data.frame(cartilage_regions_centers)$start,  n_tiles)
+cartilage_regions_tiled_df$ID <- paste(cartilage_regions_tiled_df$seqnames, ":", 
+cartilage_regions_tiled_df$region_start, sep = "")
+cartilage_regions_tiled_df$ID2 <- paste(cartilage_regions_tiled_df$seqnames, ":", 
+cartilage_regions_tiled_df$region_start, "_", 
+                                        cartilage_regions_tiled_df$tile, sep = "")
+
+#get DNA sequences
+human_seqs <- getSeq(BSgenome.Hsapiens.UCSC.hg38, cartilage_regions_tiled)
+cartilage_regions_tiled_df$seq <- as.character(human_seqs)
+
+#add labels which will allow us to pair liftover sequences to the human tile
+mcols(cartilage_regions_tiled)$ID2 <- cartilage_regions_tiled_df$ID2
+
+#perform the lightover to PanTro6
+chimp_cartilage_regions_tiled <- liftOver(x = cartilage_regions_tiled, chain = import.chain("/Users/alexanderokamoto/Desktop/Polymorphisms_Project/LiftOver/Chains/hg38ToPanTro6.over.chain")) %>% unlist()
+
+#convert results to df
+chimp_cartilage_regions_tiled_df <- as.data.frame(chimp_cartilage_regions_tiled)
+
+#get DNA sequences
+chimp_seqs <- getSeq(BSgenome.Ptroglodytes.UCSC.panTro6, chimp_cartilage_regions_tiled)
+chimp_cartilage_regions_tiled_df$seq <- as.character(chimp_seqs)
+
+#liftover sometimes results in two or more alignments for a given human sequence due to an indel/chromosomal rearrangement, therefore, we need to stitch these regions back together
+
+#create variable to fill with the concatenated sequence
+chimp_cartilage_regions_tiled_df$seq_concat <- NA
+chimp_cartilage_regions_tiled_df$multi_chrom <- "NO"
+
+indels <- 0
+for (i in unique(chimp_cartilage_regions_tiled_df$ID2)){
+  #get positions of matches
+  seq_block_positions <- which(chimp_cartilage_regions_tiled_df$ID2 == i)
+  
+  #first, process tiles which liftover to a single region of the chimp genome
+  if(length(seq_block_positions) == 1){
+    #set seq_concat equal to seq
+    chimp_cartilage_regions_tiled_df$seq_concat[seq_block_positions] <- chimp_cartilage_regions_tiled_df$seq[seq_block_positions]
+  }
+  if (length(seq_block_positions) > 1){
+  #keep track of number of regions which stitching required
+  indels <- indels + 1
+  
+  #check if there is a chromosomal rearrangement at this positons
+  if(length(unique(chimp_cartilage_regions_tiled_df$seqnames[seq_block_positions])) == 1){
+    #stitch together sequences 
+    chimp_cartilage_regions_tiled_df$seq_concat[seq_block_positions] <- paste(chimp_cartilage_regions_tiled_df$seq[seq_block_positions], collapse  = "")
+    
+  }else{
+    #stitch together sequences 
+    chimp_cartilage_regions_tiled_df$seq_concat[seq_block_positions] <- paste(chimp_cartilage_regions_tiled_df$seq[seq_block_positions], collapse  = "")
+    chimp_cartilage_regions_tiled_df$multi_chrom[seq_block_positions] <- "YES"
+  }
+}
+}
+
+#reduce set to combined sequences only (no duplicates)
+chimp_cartilage_regions_tiled_df_reduced <- chimp_cartilage_regions_tiled_df %>% dplyr::select(c(ID2, seq_concat, multi_chrom)) %>% distinct()
+
+#merge human and chimp dataframes
+cartilage_regions_tiled_df_merged <- merge(x = cartilage_regions_tiled_df, y = chimp_cartilage_regions_tiled_df_reduced, by = "ID2", all.x = T, suffixes = c("_hs", "_chimp")) %>% dplyr::select(c(-ID, -tile))
+
+#compare two DNA sequences and count the number of differences
+#if the length of the sequences are not equal, return "999" to prevent R treating NA as a 0 for downstream steps
+compare.DNA <- function(x, y){
+    count <- 0
+    x_bps <- unlist(str_split(x, pattern = ""))
+    y_bps <- unlist(str_split(y, pattern = ""))
+    if(length(x_bps) == length(y_bps)){
+      count <- length(which(sapply(seq(length(x_bps)),
+      function(i){
+          x_bps[i] != y_bps[i]
+      })))
+      return(count)
+    }else{
+      return(999)
+    }
+}
+
+#count number of differences between human and chimp alignments
+#this only works for sequences of equal length
+cartilage_regions_tiled_df_merged$human_chimp_diff_count <- NA
+
+for (i in 1:nrow(cartilage_regions_tiled_df_merged)){
+  cartilage_regions_tiled_df_merged$human_chimp_diff_count[i] <- compare.DNA(cartilage_regions_tiled_df_merged$seq[i], cartilage_regions_tiled_df_merged$seq_concat[i])
+}
+#count number of tiles with perfect sequence match between human and chimp
+length(which(cartilage_regions_tiled_df_merged$human_chimp_diff_count == 0))
+
+#plot histogram of differences 
+hist(cartilage_regions_tiled_df_merged$human_chimp_diff_count)
+
+#finally, filter this matrix 
+#remove the following
+  #human tiles which map to multiple chimp chromosomes
+  #human tiles which fail to map to chimp
+  #human tiles which perfectly match chimp tile
+cartilage_regions_tiled_df_filtered <- cartilage_regions_tiled_df_merged %>% dplyr::filter(multi_chrom == "NO") %>% dplyr::filter(!is.na(seq_concat)) %>% dplyr::filter(human_chimp_diff_count != 0) %>% dplyr::select(c(-strand, -region_start, -multi_chrom, -human_chimp_diff_count))
+```
+
+Out of 160,354 tiles, 9,497 were identical between humans and chimps (6%), 137 mapped to multiple chimp chromosomes (<1%), and 4,661 failed to map to chimp at all (2.9%). If these tiles are removed, that results in 146,059 total tiles each for human and chimp (292,118 total oligos).
+
+### STEP 4: Add adapter sequence 
+
+FASTA format of the final amplicon sequence for the ∆GFP sequencing library
+>MPRA_Oligo_v3_ampB_ext ILMN PCR 1
+CAAGCAGAAGACGGCATACGAGATNNNNNNNNNNGTGACTGGAGTTCAGACGTGTGCTCTTCCGATCTAACTGGCCGCT
+TGACGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN
+NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN
+NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNCACTGCGGCTCCTGCGATCGCGTCGACGAACC
+TCTAGANNNNNNNNNNNNNNNNNNNNAGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTNNNNNNNNNNGTGTAGATCT
+CGGTGGTCGCCGTATCATT
+
+From Ryan Tewhey on padding sequences with shorter sequence length due to indels:
+"We typically use pos 70-84 and 285-299 as the adapters during oligo synthesis. When the insert is shorter than 200 bp extend the adapter outwards. For example, a 196 bp insert would use pos 68-84 and 285-301."
+
+```{r}
+#read in MPRA oligo sequence
+MPRA_Oligo_seq <-"CAAGCAGAAGACGGCATACGAGATNNNNNNNNNNGTGACTGGAGTTCAGACGTGTGCTCTTCCGATCTAACTGGCCGCTTGACGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNCACTGCGGCTCCTGCGATCGCGTCGACGAACCTCTAGANNNNNNNNNNNNNNNNNNNNAGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTNNNNNNNNNNGTGTAGATCTCGGTGGTCGCCGTATCATT"
+MPRA_Oligo_bps <- unlist(str_split(MPRA_Oligo_seq , pattern = ""))
+
+#15 bp adapters for oligo
+MPRA_Oligo_bps[70:84] #start
+MPRA_Oligo_bps[285:299]  #end
+
+#count chimp sequence lengths
+cartilage_regions_tiled_df_filtered$width_chimp <- NA
+for (i in 1:nrow(cartilage_regions_tiled_df_filtered)){
+  cartilage_regions_tiled_df_filtered$width_chimp[i] <- length(unlist(str_split(cartilage_regions_tiled_df_filtered$seq_concat[i], pattern = "")))
+}
+
+hist(cartilage_regions_tiled_df_filtered$width_chimp)
+#most regions align to a comparably long region of the chimp genome. 
+
+#set threshold for acceptable alignment level
+chimp_align_threshold <- 0.9
+#filter out tiles with limited alignment
+cartilage_regions_tiled_df_filtered2 <- cartilage_regions_tiled_df_filtered %>% dplyr::filter(width_chimp > chimp_align_threshold*oligo_length)
+
+#if we require greater than 90% alignment, this only removes 1,934 tiles.
+
+#add column for number of bp to pad chimp sequence with
+cartilage_regions_tiled_df_filtered2$padding <- cartilage_regions_tiled_df_filtered2$width - cartilage_regions_tiled_df_filtered2$width_chimp
+
+start_adapter <- paste(MPRA_Oligo_bps[70:84], sep = "", collapse = "")
+end_adapter <- paste(MPRA_Oligo_bps[285:299], sep = "", collapse = "")
+
+#add columns for human plus adapter sequences
+cartilage_regions_tiled_df_filtered2$hs_seq_adapters <- NA
+for (i in 1:nrow(cartilage_regions_tiled_df_filtered2)){
+  cartilage_regions_tiled_df_filtered2$hs_seq_adapters[i] <- paste(start_adapter, cartilage_regions_tiled_df_filtered2$seq[i], end_adapter, sep = "", collapse = "")
+}
+
+#add columns for chimp plus adapter sequences
+cartilage_regions_tiled_df_filtered2$chimp_seq_adapters <- NA
+
+#first for tile of the same length in human and chimp
+for (i in which(cartilage_regions_tiled_df_filtered2$width_chimp == oligo_length)){
+  cartilage_regions_tiled_df_filtered2$chimp_seq_adapters[i] <- paste(start_adapter, cartilage_regions_tiled_df_filtered2$seq_concat[i], end_adapter, sep = "", collapse = "")
+}
+
+cartilage_regions_tiled_df_filtered2$human_trim <- NA
+#next for tiles of different length in human and chimp
+for (i in which(cartilage_regions_tiled_df_filtered2$padding > 0)){
+  #check if even number of matches
+  if(cartilage_regions_tiled_df_filtered2$padding[i] %% 2 == 0){
+    pad_value <- cartilage_regions_tiled_df_filtered2$padding[i]/2
+    start_adapter_padded <- paste(MPRA_Oligo_bps[(70 - pad_value):84], sep = "", collapse = "")
+    end_adapter_padded <- paste(MPRA_Oligo_bps[285:(299 + pad_value)], sep = "", collapse = "")
+      cartilage_regions_tiled_df_filtered2$chimp_seq_adapters[i] <- paste(start_adapter_padded, cartilage_regions_tiled_df_filtered2$seq_concat[i], end_adapter_padded, sep = "", collapse = "")
+      cartilage_regions_tiled_df_filtered2$human_trim[i] <- str_sub(cartilage_regions_tiled_df_filtered2$seq[i], pad_value + 1, (-pad_value -1))
+  }
+  #check if odd number of matches
+  if(cartilage_regions_tiled_df_filtered2$width_chimp[i] %% 2 == 1){
+    pad_value <- (cartilage_regions_tiled_df_filtered2$padding[i]/2 - 0.5)
+    start_adapter_padded <- paste(MPRA_Oligo_bps[(70 - pad_value - 1):84], sep = "", collapse = "")
+    end_adapter_padded <- paste(MPRA_Oligo_bps[285:(299 + pad_value)], sep = "", collapse = "")
+      cartilage_regions_tiled_df_filtered2$chimp_seq_adapters[i] <- paste(start_adapter_padded, cartilage_regions_tiled_df_filtered2$seq_concat[i], end_adapter_padded, sep = "", collapse = "")
+    
+  }
+}
+
+#check if all sequences are the expected length
+table(nchar(cartilage_regions_tiled_df_filtered2$hs_seq_adapters))
+table(nchar(cartilage_regions_tiled_df_filtered2$chimp_seq_adapters))
+```
+
+All tiles are of the desired length with the attached adapters on both ends. This library covers 122 million base pairs of the human genome. Note that an additional 1,242 sequences were removed due to <90% alignment of chimp to human. The new result is 144,817 total tiles each for human and chimp (289,634 total oligos).
+
+### STEP 5: Prepare file of oligos to synthesize
+Finally, we will filter, label, and export the results as needed to order the oligos. Also add positive and negative control sequences
+
+Regarding the controls he provided, Ryan Tewhey writes:
+
+"The second column signifies a positive (ctrl:pos) or negative (ctrl:neg) activity control. The third column is the source of the control. Currently, our favorite negative controls are the ORF sequences followed by the Nadav controls. The other controls (condel, condel_geuvadis, geuvadis) have a tighter distribution and show fewer false positives however the mode has a slight shift towards positive activity so it is not the ideal set to normalize with.
+
+We use the positive sequences to judge signal:noise at the population level. I would not expect them to be active in all cell types."
+
+```{r}
+#read in controls data
+MPRA_200bp_controls <- read.table("~/Desktop/MPRA_controls_neg_pos.id.seq")
+names(MPRA_200bp_controls) <- c("ID", "type", "source", "sequence")
+
+MPRA_270bp_pos_controls <- read.table("~/Desktop/Capellini_Lab/MPRA/Cartilage_MPRA/MPRA_controls_active.id.270.seq")
+names(MPRA_270bp_pos_controls) <- c("ID","sequence")
+
+MPRA_270bp_neg_controls <- read.table("~/Desktop/Capellini_Lab/MPRA/Cartilage_MPRA/K562_AllTREs_110819_Yu_ORF-NegCtrl_270bp.seq")
+names(MPRA_270bp_neg_controls) <- c("ID","sequence")
+
+#pad controls and add adapters
+#total number of controls desired is 366 to make it an even 290,000 oligos
+MPRA_controls <- rbind(MPRA_270bp_pos_controls, MPRA_270bp_neg_controls[sample(1:nrow(MPRA_270bp_neg_controls), size =295),])
+
+#add column for number of bp to pad sequence with
+MPRA_controls$padding <- NA
+MPRA_controls$padding <- (oligo_length - nchar(MPRA_controls$sequence))
+
+start_adapter <- paste(MPRA_Oligo_bps[70:84], sep = "", collapse = "")
+end_adapter <- paste(MPRA_Oligo_bps[285:299], sep = "", collapse = "")
+
+#add columns for human plus adapter sequences
+MPRA_controls$ctl_seq_adapters <- NA
+#first for those controls which do not require padding
+for (i in which(MPRA_controls$padding == 0)){
+  MPRA_controls$ctl_seq_adapters[i] <- paste(start_adapter, MPRA_controls$sequence[i], end_adapter, sep = "", collapse = "")
+}
+
+#next which require padding
+for (i in which(MPRA_controls$padding > 0)){
+  #check if even number of matches
+  if(MPRA_controls$padding[i] %% 2 == 0){
+    pad_value <- MPRA_controls$padding[i]/2
+    start_adapter_padded <- paste(MPRA_Oligo_bps[(70 - pad_value):84], sep = "", collapse = "")
+    end_adapter_padded <- paste(MPRA_Oligo_bps[285:(299 + pad_value)], sep = "", collapse = "")
+      MPRA_controls$ctl_seq_adapters[i] <- paste(start_adapter_padded, MPRA_controls$sequence[i], end_adapter_padded, sep = "", collapse = "")
+  }
+  #check if off number of matches
+  if(MPRA_controls$padding[i] %% 2 == 1){
+    pad_value <- (MPRA_controls$padding[i]/2 - 0.5)
+    start_adapter_padded <- paste(MPRA_Oligo_bps[(70 - pad_value - 1):84], sep = "", collapse = "")
+    end_adapter_padded <- paste(MPRA_Oligo_bps[285:(299 + pad_value)], sep = "", collapse = "")
+      MPRA_controls$ctl_seq_adapters[i] <- paste(start_adapter_padded, MPRA_controls$sequence[i], end_adapter_padded, sep = "", collapse = "")
+    
+  }
+}
+
+table(nchar(MPRA_controls$ctl_seq_adapters))
+
+cartilage_regions_tiled_df_filtered2 <- cartilage_regions_tiled_df_filtered2[-which(cartilage_regions_tiled_df_filtered2$ID2 %in% c("chr17:83128715_1", "chr12:132222427_1")),]
+
+#make final dataframe for output
+output_table <- data.frame(name = MPRA_controls$ID, sequence = MPRA_controls$ctl_seq_adapters)
+output_table <- rbind(output_table, data.frame(name = paste(cartilage_regions_tiled_df_filtered2$ID2, "_hs", sep = ""), sequence = cartilage_regions_tiled_df_filtered2$hs_seq_adapters), data.frame(name = paste(cartilage_regions_tiled_df_filtered2$ID2, "_chimp", sep = ""), sequence = cartilage_regions_tiled_df_filtered2$chimp_seq_adapters))
+
+#final check that sequences are all of correct length
+table(nchar(output_table$sequence))
+
+#write table as tab separated file
+write_delim(x = output_table, file = "~/Desktop/cartilage_MPRA_oligo_seqs2.tsv", col_names = T, delim = "\t")
+```
+In total, the library contains 290,000 oligos of 300 bp each (including adapters). 
+
+#create a fasta format file of sequences
+```{r}
+#load library for writing fasta file
+library(seqinr)
+
+#read table as tab separated file
+oligo_seqs <- read.table(file = "~/Desktop/Capellini_Lab/MPRA/Cartilage_MPRA/cartilage_MPRA_oligo_seqs2.tsv", header = T)
+
+#remove adapters
+oligo_seqs$cleaned <- sub(".*ACTGGCCGCTTGACG", "", oligo_seqs$sequence)
+oligo_seqs$cleaned <- sub("CACTGCGGCTCCTGC.*", "", oligo_seqs$cleaned)
+
+oligo_seqs <- oligo_seqs[!duplicated(oligo_seqs), ]
+
+#oligo_seqs$name[which(duplicated(oligo_seqs$name))] <- paste(oligo_seqs$name[which(duplicated(oligo_seqs$name))], "_2", sep = "")
+
+#write fasta
+write.fasta(sequences = as.list(oligo_seqs$cleaned), 
+            names = oligo_seqs$name, 
+            file.out = "~/Desktop/Capellini_Lab/MPRA/Cartilage_MPRA/cartilage_MPRA_oligo_seqs.fasta", 
+            open = "w", as.string = F)
+```
+
+
+
