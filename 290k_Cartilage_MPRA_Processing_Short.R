@@ -1,4 +1,7 @@
 setwd("~/Desktop/290k_MPRA_Cluster_Results/")
+#load packages
+library("MPRAmodel")
+library("tidyverse")
 
 countsData <- read.table("~/Desktop/290k_MPRA_Cluster_Results/AO_Cartilage.count", header = T)
 attributesData <- read.table(file = "~/Desktop/290k_MPRA_Cluster_Results/AO_Cartilage_attributes.txt", header = T)
@@ -7,10 +10,7 @@ attributesData <- read.table(file = "~/Desktop/290k_MPRA_Cluster_Results/AO_Cart
 countsData$K562_r5 <- NULL
 
 conditionData <- read.table("~/Desktop/290k_MPRA_Cluster_Results/AO_Cartilage_condition.txt", header = F, row.names = 1)
-
 conditionData <- conditionData %>% slice(-10)
-#colnames(conditionData) <- c("sample", "condition")
-#rownames(conditionData) <- conditionData[,1]
 
 filePrefix <- "290k"
 projectName <- "290k_MPRA"
