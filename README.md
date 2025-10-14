@@ -12,6 +12,8 @@ Initial processing of the sequencing data was performed on the Harvard FAS compu
 
 The code provided here is exactly what was run to perform these analyses but may not run on another system without modifications to ensure proper software, computational power, and directory structures. Please reach out to me at aokamoto@g.harvard.edu if you wish to replicate these analyses and the provided code is insufficient. I will try to help you to the best of my abilities.
 
+Some functions used in the study are available from: https://github.com/aokamoto-bio/Human_Autopod_Evolution/blob/main/Custom_Analysis_Functions.R
+
 **Files:**
 
 1. Cartilage_MPRA_Design_270bp.Rmd details the construction of the library based on ATAC-seq data. 
