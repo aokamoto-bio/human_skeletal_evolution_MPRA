@@ -47,7 +47,7 @@ attributes$window[which(attributes$project == "SNP")][which(split2$V2 == "2")] <
 attributes$allele[grep(x = attributes$id, pattern = "_hs")] <- "ref"
 attributes$allele[grep(x = attributes$id, pattern = "_chimp")] <- "alt"
 
-#I think there is a capitalization typo...
+#fix capitalization issue
 attributes$ID <- attributes$id
 attributes$SNP <- attributes$snp
 attributes$chr <- attributes$chromosome
