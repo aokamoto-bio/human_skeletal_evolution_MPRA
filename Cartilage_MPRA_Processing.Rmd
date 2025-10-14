@@ -1,0 +1,521 @@
+---
+title: "Cartilage_MPRA_Processing"
+author: "Alexander Okamoto"
+date: "2025-03-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## MPRA Sequencing Data Processing
+
+To do the MPRA data processing, we used the code developed by Ryan Tewhey's lab. To that end, I created the computational environment required here:
+/n/capellini_lab/users/aokamoto/MPRA/MPRA_oligo_barcode_pipeline-master/environment/mpra_oligo_barcode.sif 
+
+The command to run build this environment is below:
+
+```{bash, eval = F}
+singularity build mpra_oligo_barcode.sif mpra_oligo_barcode.def
+```
+
+This singularity container is extremely cool as it allows us to easily install and run their computing environment on our cluster. 
+
+Details of the Tewhey lab pipeline and the code are available via github [here](https://github.com/tewhey-lab/MPRA_oligo_barcode_pipeline). Please read through this before continuing. 
+
+My notes and code for running this pipeline are below. First off, the most important part is to create the appropriate json files which contain all the filepaths/output names for the experiment. Scripts to fill these in are provided but I found it was generally easier to make the changes from the templates manually.
+
+The Tewhey lab pipeline involves two steps: (1) MPRAmatch, and (2) MPRAcount. In the former, barcodes are linked to oligos and in the latter, the number of barcode and plasmid reads are counted.
+
+#Part 1: MPRAmatch to associate oligos with barcodes 
+Since the Novaseq X only generates reads of 150 bp pairs in length, the paired end reads did not overlap and did not cover the entire barcoded oligo sequence (total length: 369 bp, oligo (270bp) + F primer (22bp addition) + R primer (77bp addition)). Therefore, we modified the MPRAmatch script, removing the initial step that calls FLASH2 to merge overlapping paired end reads, instead merging the forward and reverse reads with an intervening 100 Ns using the BBMap fuse.sh tool. 
+
+```{bash}
+#!/bin/bash
+#SBATCH -J MPRAfuse
+#SBATCH -o MPRAfuse_out
+#SBATCH -e MPRAfuse_err
+#SBATCH -p test # partition(this is the standard)
+#SBATCH -N 1 # number of nodes
+#SBATCH -n 10 # number of cores
+#SBATCH --mem 150GB # memory pool for all cores
+#SBATCH -t 0-03:00 # time (D-HH:MM)
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=aokamoto@g.harvard.edu
+
+#/n/capellini_lab/users/aokamoto/Software/bbmap/fuse.sh in1=/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AO_MPRA_TagSeq_S1_L005_R1_001.fastq.gz in2=/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AO_MPRA_TagSeq_S1_L005_R2_001.fastq.gz pad=100 out=/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/fused_TagSeq_Reads2.fastq fusepairs -eoom overwrite=t
+
+/n/capellini_lab/users/aokamoto/Software/bbmap/fuse.sh in1=/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AO_MPRA_TagSeq_S1_L005_R1_001.fastq.gz in2=/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AO_MPRA_TagSeq_S1_L005_R2_001.fastq.gz pad=100 out=fused_TagSeq_Reads2.fastq fusepairs -eoom overwrite=t
+```
+
+To avoid an error due to the incomplete coverage of the oligo sequences, the standard MPRAmatch “%sequence mismatch” threshold was circumvented by setting the value for all sequences below the standard threshold.
+
+In the SAM2MPRA_cs.pl script from MPRAmatch: 
+
+my $score_cutoff = 2; #instead of 0.05
+
+The modified MPRAmatch script from the Tewhey lab code (https://github.com/tewhey-lab/MPRASuite) with parameters is below:
+
+```{bash}
+# Pipeline for matching barcodes and oligos for MPRA data
+# output of the Parse task should be used as the input for the ReplicateCount pipeline
+
+workflow MPRAmatch {
+  File reads #combined fastq
+  File reference_fasta #Oligo sequences with names (can be the oligo order sheet)
+  File? attributes #Optional attributes file used for saturation mutagenesis libraries
+  Int? barcode_orientation = 2 #2 if you followed the method above, otherwise 1. Default to 2
+  Int? thread = 30 #Number of threads to be passed to FLASH2 and MiniMap2. Default to 30
+  Int? mem = 30 #Memory to be passed to the sort function. Default to 30G
+  Int? read_len = 151 #Length of reads that are being flashed. If mixed lengths use max.
+  Int? frag_len = 274 #Fragment length passed to FLASH2
+  Int? seq_min = 100 #Minimum acceptable sequence length when separating the barcodes and oligos
+  Int? enh_min = 50 #Minimum acceptable length for an oligo
+  Int? enh_max = 400 #Maximum acceptable length for an oligo
+  Int? bc_len = 20 #Length of barcodes used for project
+  Int? bc_link_size = 38 #Length of adapter between barcode and oligo (include linker sequences)
+  Int? end_link_size = 16 #Length of end adapter after oligo (5' end, include linker sequence)
+  String working_directory #String of the directory relative to the WDL where the other required scripts live
+  String out_directory #String of the directory that all files will be copied to
+  String id_out #Project identifier - all files will have this as the prefix for their name
+  String? barcode_link = "TCTAGA" #6 base sequence on the barcode end of the link between the barcode and oligo - orientation barcode to oligo
+  String? oligo_link = "AGTG" #4 base sequence on the oligo end of the link between the barcode and oligo - orientation barcode to oligo
+  String? end_oligo_link = "CGTC" #4 base sequence at the very end of the oligo
+
+
+  call Pull_Barcodes { input:
+                          #pull = pull,
+                          working_directory=working_directory,
+                          merged_fastq=reads,
+                          read_number=barcode_orientation,
+                          id_out=id_out,
+                          barcode_link=barcode_link,
+                          seq_min=seq_min,
+                          enh_min=enh_min,
+                          enh_max=enh_max,
+                          bc_len=bc_len,
+                          oligo_link=oligo_link,
+                          end_oligo_link=end_oligo_link,
+                          bc_link_size=bc_link_size,
+                          end_link_size=end_link_size
+                        }
+  call Rearrange { input:
+                      matched_barcodes=Pull_Barcodes.out1,
+                      id_out=id_out
+                    }
+  call MiniMap { input:
+                    reference_fasta=reference_fasta,
+                    organized_fasta=Rearrange.out,
+                    map_thread=thread,
+                    id_out=id_out
+                  }
+  call SAM2MPRA { input:
+                      #sam=sam,
+                      working_directory=working_directory,
+                      sam_file=MiniMap.out1,
+                      id_out=id_out
+                    }
+  call Sort { input:
+                  MPRA_out=SAM2MPRA.out,
+                  sort_mem=mem,
+                  id_out=id_out
+                }
+  call Ct_Seq { input:
+                    #count=count,
+                    working_directory=working_directory,
+                    sorted=Sort.out,
+                    id_out=id_out
+                  }
+  if (defined(attributes)) {
+    call Parse_sat_mut { input:
+                  #  parse=parse,
+                    attributes=attributes,
+                    working_directory=working_directory,
+                    counted=Ct_Seq.out,
+                    id_out=id_out
+                  }
+  }
+  if (!defined(attributes)) {
+    call Parse { input:
+                  #  parse=parse,
+                    working_directory=working_directory,
+                    counted=Ct_Seq.out,
+                    id_out=id_out
+                  }
+  }
+
+  call preseq { input:
+                 counted=Ct_Seq.out,
+                 id_out=id_out
+              }
+  call qc_plot_t { input:
+                    parsed=Parse.out_parsed,
+                    hist=Parse.out_hist,
+                    preseq_out=preseq.res,
+                    preseq_in=preseq.hist,
+                    reference_fasta=reference_fasta,
+                    working_directory=working_directory,
+                    id_out=id_out
+              }
+  call relocate { input:
+                    matched=Pull_Barcodes.out1,
+                    rejected=Pull_Barcodes.out2,
+                    organized_fasta=Rearrange.out,
+                    sam_file=MiniMap.out3,
+                    map_log=MiniMap.out2,
+                    MPRA_out=SAM2MPRA.out,
+                    sorted=Sort.out,
+                    counted=Ct_Seq.out,
+                    parsed=Parse.out_parsed,
+                    plothist=Parse.out_hist,
+                    preseq_hist=preseq.hist,
+                    preseq_res=preseq.res,
+                    qc_plot=qc_plot_t.plots,
+                    out_directory=out_directory
+                  }
+  }
+
+task Pull_Barcodes {
+  # Pull barcodes from the barcode oligo sequences
+  File merged_fastq
+  Int read_number
+  String working_directory
+  String id_out
+  String barcode_link
+  String oligo_link
+  String end_oligo_link
+  Int seq_min
+  Int enh_min
+  Int enh_max
+  Int bc_len
+  Int bc_link_size
+  Int end_link_size
+  command {
+    perl ${working_directory}/pull_barcodes.pl ${merged_fastq} ${read_number} ${id_out}.merged ${barcode_link} ${oligo_link} ${end_oligo_link} ${seq_min} ${enh_min} ${enh_max} ${bc_len} ${bc_link_size} ${end_link_size}
+    }
+  output {
+    File out1="${id_out}.merged.match"
+    File out2="${id_out}.merged.reject"
+    }
+  }
+task Rearrange {
+  # Rearrange the ouptut of the pull_barcodes task to be in a fasta format
+  File matched_barcodes
+  String id_out
+  command <<<
+    awk '{print ">"$1"#"$3"\n"$4}' ${matched_barcodes} > ${id_out}.merged.match.enh.fa
+    gzip ${id_out}.merged.match.enh.fa
+    >>>
+  output {
+    File out="${id_out}.merged.match.enh.fa.gz"
+    }
+  }
+task MiniMap {
+  # Map the oligos to the reference to get the oligo names
+  File reference_fasta
+  File organized_fasta
+  Int map_thread
+  String id_out
+  command {
+    minimap2 --for-only -Y --secondary=no -m 10 -n 1 -t ${map_thread} --end-bonus 12 -O 5 -E 1 -k 10 -2K50m --eqx --cs=short -c -a ${reference_fasta} ${organized_fasta} > ${id_out}.merged.match.enh.sam 2> ${id_out}.merged.match.enh.log
+    samtools view -S -b ${id_out}.merged.match.enh.sam > ${id_out}.merged.match.enh.bam
+    }
+  output {
+    File out1="${id_out}.merged.match.enh.sam"
+    File out2="${id_out}.merged.match.enh.log"
+    File out3="${id_out}.merged.match.enh.bam"
+    }
+  }
+task SAM2MPRA {
+  # Convert the output of the SAM file into a format closer to the dictionary. Pulls the CIGAR and error information
+  File sam_file
+  String working_directory
+  String id_out
+  command {
+    perl ${working_directory}/SAM2MPRA_cs.pl -C ${sam_file} ${id_out}.merged.match.enh.mapped
+    }
+  output {
+    File out="${id_out}.merged.match.enh.mapped"
+    }
+  }
+task Sort {
+  File MPRA_out
+  Int sort_mem
+  String id_out
+  command {
+    sort -S${sort_mem}G -k2 ${MPRA_out} > ${id_out}.merged.match.enh.mapped.barcode.sort
+    }
+  output {
+    File out="${id_out}.merged.match.enh.mapped.barcode.sort"
+    }
+  }
+task Ct_Seq {
+  # Counts the number of times a barcode-oligo pair occurs
+  File sorted
+  String working_directory
+  String id_out
+  command {
+    perl ${working_directory}/Ct_seq.pl ${sorted} 2 4 > ${id_out}.merged.match.enh.mapped.barcode.ct
+    }
+  output {
+    File out="${id_out}.merged.match.enh.mapped.barcode.ct"
+    }
+  }
+task Parse {
+  # Parses the barcode oligo pairs to resolve multimapping barcodes
+  File counted
+  String working_directory
+  String id_out
+  command <<<
+    perl ${working_directory}/parse_map.pl ${counted} > ${id_out}.merged.match.enh.mapped.barcode.ct.parsed
+
+    awk '($5 == 0)' ${counted} | awk '{ct[$2]++;cov[$2]+=$4;} END {for(i in ct) print i"\t"ct[i]"\t"cov[i]}' > ${id_out}.merged.match.enh.mapped.barcode.ct.plothist
+    >>>
+  output {
+    File out_parsed="${id_out}.merged.match.enh.mapped.barcode.ct.parsed"
+    File out_hist="${id_out}.merged.match.enh.mapped.barcode.ct.plothist"
+    }
+  }
+
+task Parse_sat_mut {
+  # Parses the barcode oligo pairs to resolve multimapping barcodes
+  File? attributes
+  File counted
+  String working_directory
+  String id_out
+  Boolean sat_mut=defined(attributes)
+  command <<<
+    perl ${working_directory}/parse_map.pl -S -A ${attributes} ${counted} > ${id_out}.merged.match.enh.mapped.barcode.ct.parsed
+    awk '($5 == 0)' ${counted} | awk '{ct[$2]++;cov[$2]+=$4;} END {for(i in ct) print i"\t"ct[i]"\t"cov[i]}' > ${id_out}.merged.match.enh.mapped.barcode.ct.plothist
+    >>>
+  output {
+    File out_parsed="${id_out}.merged.match.enh.mapped.barcode.ct.parsed"
+    File out_hist="${id_out}.merged.match.enh.mapped.barcode.ct.plothist"
+    }
+  }
+task qc_plot_t {
+  File parsed
+  File hist
+  File preseq_out
+  File preseq_in
+  File reference_fasta
+  String working_directory
+  String id_out
+  command {
+    Rscript ${working_directory}/mapping_QC_plots.R ${parsed} ${hist} ${preseq_out} ${preseq_in} ${reference_fasta} ${id_out}
+    }
+  output {
+    File plots="${id_out}_barcode_qc.pdf"
+    }
+  }
+task preseq {
+  # Determine sequencing depth
+  File counted
+  String id_out
+  command <<<
+    awk '{ct[$4]++}END{for (i in ct)print i "\t" ct[i]}' ${counted} | sort -k1n > ${id_out}.merged.match.enh.mapped.barcode.ct.hist
+    preseq lc_extrap -D -H ${id_out}.merged.match.enh.mapped.barcode.ct.hist -o ${id_out}.merged.match.enh.mapped.barcode.ct.hist.preseq -s 25000000 -n 1000 -e 1000000000
+    >>>
+  output {
+    File hist="${id_out}.merged.match.enh.mapped.barcode.ct.hist"
+    File res="${id_out}.merged.match.enh.mapped.barcode.ct.hist.preseq"
+   }
+ }
+task relocate{
+ File matched
+ File rejected
+ File organized_fasta
+ File sam_file
+ File map_log
+ File MPRA_out
+ File sorted
+ File counted
+ File parsed
+ File plothist
+ File preseq_hist
+ File preseq_res
+ File qc_plot
+ String out_directory
+ command {
+     mv ${matched} ${rejected} ${organized_fasta} ${sam_file} ${map_log} ${MPRA_out} ${sorted} ${counted} ${parsed} ${plothist} ${preseq_hist} ${preseq_res} ${qc_plot} ${out_directory}
+   }
+ }
+```
+
+JSON File
+
+```{bash}
+{
+  "MPRAmatch.reads": "/n/holyscratch01/capellini_lab/aokamoto/MPRA/fused_TagSeq_Reads2.fastq",
+  "MPRAmatch.reference_fasta": "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/inputs/cartilage_MPRA_oligo_seqs.fasta",
+  "MPRAmatch.working_directory": "/n/capellini_lab/users/aokamoto/MPRA/MPRA_oligo_barcode_pipeline-master/scripts",
+  "MPRAmatch.out_directory": "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/MPRAmatch_output/",
+  "MPRAmatch.id_out": "Cartilage"
+}
+```
+
+#Code to run job
+
+```{bash}
+#!/bin/bash
+#SBATCH -J MPRAmatch
+#SBATCH -o MPRAmatch_out
+#SBATCH -e MPRAmatch_err
+#SBATCH -p intermediate # partition(this is the standard)
+#SBATCH -N 1 # number of nodes
+#SBATCH -n 50 # number of cores
+#SBATCH --mem 990GB # memory pool for all cores
+#SBATCH -t 07-00:00 # time (D-HH:MM)
+#SBATCH --mail-type=all
+#SBATCH --mail-user=aokamoto@g.harvard.edu
+
+echo "Executing SIF with Code"
+
+singularity exec /n/capellini_lab/users/aokamoto/MPRA/MPRA_oligo_barcode_pipeline-master/environment/mpra_oligo_barcode.sif sh /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/scripts/MPRAmatch_script.sh
+
+echo "Done"
+```
+
+#Code to run Cromwell with wdl script and json file
+
+```{bash}
+#!/bin/bash
+
+echo "Running Cromwell"
+
+cromwell run /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/scripts/MPRAmatch_edited.wdl --inputs /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/inputs/MPRAmatch2.json
+
+echo "Finished Cromwell"
+```
+
+##Part 1: MPRAcount
+
+first concatenate files for R1 & R2
+second, only a single read is expected. Since our data was paired end, I combined the forward and reverse reads using [NGmerge](https://github.com/jsh58/NGmerge).
+
+```{bash}
+#copy file to Capellini directory on cluster
+#rsync --exclude=Data -av /n/ngsdata/20250304_LH00541_0074_A22WTTCLT3_SUB16743 /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq
+
+for cell in CHON-002 K562 TC28 Plasmid
+do
+  for rep in 1 2 3 5
+  do
+  cat SUB16743_AOkam_${cell}_Rep${rep}_*_L001_R1_001.fastq.gz SUB16743_AOkam_${cell}_Rep${rep}_*_L002_R1_001.fastq.gz SUB16743_AOkam_${cell}_Rep${rep}_*_L003_R1_001.fastq.gz SUB16743_AOkam_${cell}_Rep${rep}_*_L004_R1_001.fastq.gz SUB16743_AOkam_${cell}_Rep${rep}_*_L005_R1_001.fastq.gz > /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/SUB16743_AOkam_${cell}_Rep${rep}_R1.fastq.gz
+cat SUB16743_AOkam_${cell}_Rep${rep}_*_L001_R2_001.fastq.gz SUB16743_AOkam_${cell}_Rep${rep}_*_L002_R2_001.fastq.gz SUB16743_AOkam_${cell}_Rep${rep}_*_L003_R2_001.fastq.gz SUB16743_AOkam_${cell}_Rep${rep}_*_L004_R2_001.fastq.gz SUB16743_AOkam_${cell}_Rep${rep}_*_L005_R2_001.fastq.gz > /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/SUB16743_AOkam_${cell}_Rep${rep}_R2.fastq.gz
+  done
+done
+
+#repeat for  Plasmid, only 4 reps
+for cell in Plasmid
+do
+  for rep in 1 2 3 4
+  do
+  cat SUB16743_AOkam_${cell}_${rep}_*_L001_R1_001.fastq.gz SUB16743_AOkam_${cell}_${rep}_*_L002_R1_001.fastq.gz SUB16743_AOkam_${cell}_${rep}_*_L003_R1_001.fastq.gz SUB16743_AOkam_${cell}_${rep}_*_L004_R1_001.fastq.gz SUB16743_AOkam_${cell}_${rep}_*_L005_R1_001.fastq.gz > /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/SUB16743_AOkam_${cell}_Rep${rep}_R1.fastq.gz
+cat SUB16743_AOkam_${cell}_${rep}_*_L001_R2_001.fastq.gz SUB16743_AOkam_${cell}_${rep}_*_L002_R2_001.fastq.gz SUB16743_AOkam_${cell}_${rep}_*_L003_R2_001.fastq.gz SUB16743_AOkam_${cell}_${rep}_*_L004_R2_001.fastq.gz SUB16743_AOkam_${cell}_${rep}_*_L005_R2_001.fastq.gz > /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/SUB16743_AOkam_${cell}_Rep${rep}_R2.fastq.gz
+  done
+done
+
+#now combine forward and reverse reads
+for cell in CHON-002 K562 TC28
+do
+  for rep in 1 2 3 4 5
+  do
+  /n/capellini_lab/users/aokamoto/Software/NGmerge-master/NGmerge -1 /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/SUB16743_AOkam_${cell}_Rep${rep}_R1.fastq.gz -2 /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/SUB16743_AOkam_${cell}_Rep${rep}_R2.fastq.gz -o /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_${cell}_Rep${rep}.fastq.gz
+  done
+done
+
+for cell in Plasmid
+do
+  for rep in 1 2 3 4
+  do
+  /n/capellini_lab/users/aokamoto/Software/NGmerge-master/NGmerge -1 /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/SUB16743_AOkam_${cell}_Rep${rep}_R1.fastq.gz -2 /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/SUB16743_AOkam_${cell}_Rep${rep}_R2.fastq.gz -o /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_${cell}_Rep${rep}.fastq.gz
+  done
+done
+```
+
+Similar to MPRAmatch, MPRAcount takes a json file input which specifies the input files/output directories, etc. The file I used is below and on cluster at /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/inputs/MPRAcount_all_inputs.json
+
+
+Note that due to the alignment issue, column 7 of Cartilage.merged.match.enh.mapped.barcode.ct.parsed, which contains the alignment error, was set to 0.001 using awk and the corrected file used for MPRAcount.
+
+```{bash}
+    {
+      "MPRAcount.parsed": "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/MPRAmatch_output/Cartilage.merged.match.enh.mapped.barcode.ct.parsed.fixed",
+      "MPRAcount.acc_id": "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/inputs/acc_id_cartilage.txt",
+      "MPRAcount.working_directory": "/n/capellini_lab/users/aokamoto/MPRA/MPRA_oligo_barcode_pipeline-master/scripts",
+      "MPRAcount.out_directory": " /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/All_Celltypes/",
+      "MPRAcount.id_out": "AO_Cartilage",
+"MPRAcount.replicate_fastq": ["/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_CHON-002_Rep1.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_CHON-002_Rep2.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_CHON-002_Rep3.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_CHON-002_Rep4.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_CHON-002_Rep5.fastq.gz",
+"/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_K562_Rep1.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_K562_Rep2.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_K562_Rep3.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_K562_Rep4.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_K562_Rep5.fastq.gz",
+"/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_Plasmid_Rep1.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_Plasmid_Rep2.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_Plasmid_Rep3.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_Plasmid_Rep4.fastq.gz", 
+"/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_TC28_Rep1.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_TC28_Rep2.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_TC28_Rep3.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_TC28_Rep4.fastq.gz", "/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/fastq/AOkam_TC28_Rep5.fastq.gz"],
+      "MPRAcount.replicate_id": ["CHON002_r1", "CHON002_r2", "CHON002_r3", "CHON002_r4", "CHON002_r5", "K562_r1", "K562_r2", "K562_r3", "K562_r4", "K562_r5", "plasmid_r1", "plasmid_r2", "plasmid_r3", "plasmid_r4", "TC28_r1", "TC28_r2", "TC28_r3", "TC28_r4", "TC28_r5"]
+    }
+```
+
+The referenced acc_id_cartilage.txt file (/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/inputs/acc_id_cartilage.txt) is as shown below and contains replicate and cell type information. See the Tewhey lab Github for additional details. The first column are just random unique identifiers. Make sure column 2 matches the json file.
+
+```{bash}
+VL004601	CHON002_r1	CHON002	RNA
+VL004602	CHON002_r2	CHON002	RNA
+VL004603	CHON002_r3	CHON002	RNA
+VL004604	CHON002_r4	CHON002	RNA
+VL004605	CHON002_r5	CHON002	RNA
+VL004614	K562_r1	K562	RNA
+VL004615	K562_r2	K562	RNA
+VL004616	K562_r3	K562	RNA
+VL004617	K562_r4 K562	RNA
+VL004656	K562_r5	K562	RNA
+VL004618	plasmid_r1	DNA	DNA
+VL004619	plasmid_r2	DNA	DNA
+VL004620	plasmid_r3	DNA	DNA
+VL004621	plasmid_r4	DNA	DNA
+VL004626	TC28_r1	TC28	RNA
+VL004627	TC28_r2	TC28	RNA
+VL004628	TC28_r3	TC28	RNA
+VL004629	TC28_r4	TC28	RNA
+VL004630	TC28_r5	TC28	RNA
+```
+
+This script is run using:
+/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/scripts/runscript_count.sh 
+
+```{bash, eval = F}
+#!/bin/bash
+
+echo "Running Cromwell"
+
+cromwell run /n/capellini_lab/users/aokamoto/MPRA/MPRA_oligo_barcode_pipeline-master/MPRAcount.wdl --inputs /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/inputs/MPRAcount_all_inputs.json
+
+echo "Finished Cromwell"
+```
+
+Which is called on the cluster using sbatch with this script:
+
+/n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/scripts/runMPRAcount.sh 
+
+```{bash, eval = F}
+#!/bin/bash
+#SBATCH -J MPRAcount
+#SBATCH -o MPRAcount.out
+#SBATCH -e MPRAcount.err
+#SBATCH -p test # partition(this is the standard)
+#SBATCH -N 1 # number of nodes
+#SBATCH -n 40 # number of cores
+#SBATCH --mem 500GB # memory pool for all cores
+#SBATCH -t 0-06:00 # time (D-HH:MM)
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=aokamoto@g.harvard.edu
+
+echo "Loading Singularity Module"
+
+module load singularity
+
+echo "Executing SIF with Code"
+
+singularity exec /n/capellini_lab/users/aokamoto/MPRA/MPRA_oligo_barcode_pipeline-master/environment/mpra_oligo_barcode.sif sh  /n/capellini_lab/users/aokamoto/MPRA/Cartilage_MPRA/scripts/runscript_count.sh 
+
+echo "Done"
+```
