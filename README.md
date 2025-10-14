@@ -20,3 +20,6 @@ Some functions used in the study are available from: https://github.com/aokamoto
 2. Cartilage_MPRA_Processing.Rmd contains the commands used to run the MPRAsuite tools MPRAmatch and MPRA count to map oligos to barcodes and then count the barcodes.
 3. 290k_Cartilage_Build_Attributes.R create attributes file for MPRAmodel
 4. 290k_Cartilage_MPRA_Processing_Short.R run MPRAmodel to determine active and differentially active tiles
+5. 290k_Cartilage_MPRA_Metadata.R code for constructing metadata dataframe for each oligo pair
+6. MPRA_1_Controls.R for analysis of control oligos
+7. 
