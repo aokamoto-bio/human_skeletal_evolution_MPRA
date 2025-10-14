@@ -16,4 +16,5 @@ The code provided here is exactly what was run to perform these analyses but may
 
 1. Cartilage_MPRA_Design_270bp.Rmd details the construction of the library based on ATAC-seq data. 
 2. Cartilage_MPRA_Processing.Rmd contains the commands used to run the MPRAsuite tools MPRAmatch and MPRA count to map oligos to barcodes and then count the barcodes.
-3. 
+3. 290k_Cartilage_Build_Attributes.R create attributes file for MPRAmodel
+4. 290k_Cartilage_MPRA_Processing_Short.R run MPRAmodel to determine active and differentially active tiles
