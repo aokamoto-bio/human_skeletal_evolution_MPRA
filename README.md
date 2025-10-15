@@ -22,4 +22,7 @@ Some functions used in the study are available from: https://github.com/aokamoto
 4. 290k_Cartilage_MPRA_Processing_Short.R run MPRAmodel to determine active and differentially active tiles
 5. 290k_Cartilage_MPRA_Metadata.R code for constructing metadata dataframe for each oligo pair
 6. MPRA_1_Controls.R for analysis of control oligos
-7. 
+7. MPRA_2_Activity_Profiling.R for analysis of active tiles
+8. MPRA_3_Differential_Activity_Profiling.R for analysis of differentially active tiles
+9. MPRA_4_Evolutionary_Testing.R for analysis of evolutionary signals in the data
+10. MPRA_5_chimp_losses.R containing analysis of chimp losses for Figure S7
