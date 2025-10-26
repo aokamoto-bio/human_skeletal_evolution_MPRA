@@ -2,9 +2,9 @@
 
 **Code for the preprint:** 
 
-Alexander Okamoto,  Clarissa Coveney, Danalaxshmi S Ganapathee, & Terence Capellini. Massively parallel functional screen identifies thousands of regulatory differences in human versus chimpanzee postcranial skeletal development
+Alexander Okamoto,  Clarissa Coveney, Danalaxshmi S Ganapathee, & Terence Capellini. Massively parallel functional screen identifies thousands of regulatory differences in human versus chimpanzee postcranial skeletal development.
 
-DOI COMING SOON
+https://doi.org/10.1101/2025.10.21.683789
 
 **Note**
 
