@@ -139,6 +139,7 @@ bed_capellini_skeleton_overlaps(bed_file = K562_emvar_bed, label = "K562_emVars"
 all_emvar_bed <- get_MPRA_bed(unique(c(CHON002_emVars$region, TC28_emVars$region, K562_emVars$region)), filename = "290k_all_emvars")
 cell_emvar_beds <- c(all_emvar_bed, CHON_emvar_bed, TC28_emvar_bed, K562_emvar_bed)
 cell_emvar_beds_HARs <- gsub(x = cell_emvar_beds, pattern = "hg38.bed", replacement = "HARs_hg38.bed")
+cell_emvar_beds_CHARs <- gsub(x = cell_emvar_beds, pattern = "hg38.bed", replacement = "CHARs_hg38.bed")
 cell_emvar_beds_HAQERs <- gsub(x = cell_emvar_beds, pattern = "hg38.bed", replacement = "HAQERs_hg38.bed")
 
 cell_names  <- c("all", "CHON", "TC28", "K562")
@@ -147,6 +148,13 @@ for(c in 1:3){
   #hars
   emvar_dfs[c] %>% as.data.frame() %>% 
     dplyr::filter(!is.na(HARs_Overlapped)) %>% 
+    mutate(region_end = (region_start+540)) %>% 
+    dplyr::select(chr.x, region_start, region_end, HARs_Overlapped) %>% 
+    write_bed(file = cell_emvar_beds_HARs[c+1], ncol = 4)
+
+  #chars
+  emvar_dfs[c] %>% as.data.frame() %>% 
+    dplyr::filter(!is.na(CHARs_Overlapped)) %>% 
     mutate(region_end = (region_start+540)) %>% 
     dplyr::select(chr.x, region_start, region_end, HARs_Overlapped) %>% 
     write_bed(file = cell_emvar_beds_HARs[c+1], ncol = 4)
@@ -161,6 +169,7 @@ for(c in 1:3){
 
 system(paste("cat", paste(cell_emvar_beds_HARs[2:4], collapse = " "), "| sort -k 1,1 -k2,2n | bedtools merge -i stdin >", cell_emvar_beds_HARs[1], sep = " "))
 system(paste("cat", paste(cell_emvar_beds_HAQERs[2:4], collapse = " "), "| sort -k 1,1 -k2,2n | bedtools merge -i stdin >", cell_emvar_beds_HAQERs[1], sep = " "))
+system(paste("cat", paste(cell_emvar_beds_CHARs[2:4], collapse = " "), "| sort -k 1,1 -k2,2n | bedtools merge -i stdin >", cell_emvar_beds_CHARs[1], sep = " "))
 
 for(c in 1:4){
   bed_capellini_skeleton_overlaps(bed_file = cell_emvar_beds_HARs[c], 
@@ -297,15 +306,20 @@ all_emvars_df$status[which(!is.na(all_emvars_df$HAQERs_Overlapped)&!is.na(all_em
 all_emvars_df$status[which(!is.na(all_emvars_df$HAQERs_Overlapped)&!is.na(all_emvars_df$HARs_Overlapped)&!is.na(all_emvars_df$hCONDELs_Overlapped))] <- "All_Three"
 
 #calculate enrichment of HARs/emvars enrichment
-all_active_df_reduced <- all_active_df %>% dplyr::select(region, HARs_Overlapped, HAQERs_Overlapped) %>% unique()
+all_active_df_reduced <- all_active_df %>% dplyr::select(region, HARs_Overlapped, HAQERs_Overlapped, CHARs_Overlapped) %>% unique()
 all_active_df_reduced$emvar <- FALSE
 all_active_df_reduced$emvar[which(all_active_df_reduced$region %in% all_emvars_df$region)] <- TRUE
 
 emvar_HARs_table <- table(!is.na(all_active_df_reduced$HARs_Overlapped), all_active_df_reduced$emvar)
 fisher.test(emvar_HARs_table)
 
+emvar_CHARs_table <- table(!is.na(all_active_df_reduced$CHARs_Overlapped), all_active_df_reduced$emvar)
+fisher.test(emvar_CHARs_table)
+
 emvar_HAQERs_table <- table(!is.na(all_active_df_reduced$HAQERs_Overlapped), all_active_df_reduced$emvar)
 fisher.test(emvar_HAQERs_table)
+
+length(cartilage_metadata_experimental$region[which(!is.na(cartilage_metadata_experimental$CHARs_Overlapped))])
 
 #first check if within active HAR/HAR controls, there is more diff. activity in HARs
 HAR_active_df <- all_active_df %>% dplyr::filter(!is.na(HARs_Overlapped))%>% 
@@ -712,3 +726,195 @@ HAR_HAQER_total_plot <- ggdraw() +
 ggsave(plot = HAR_HAQER_total_plot + panel_border(color = "black", size = 1), 
        filename = "~/Dropbox/Cartilage MPRA Paper/Code/fig4_evol_sequence_features.png", 
        device = "png", dpi = 300, height = 9.5, width = 6.5, units = "in")
+
+
+#investigate transitions and transversions
+
+#get all SNV tiles 
+all_active_df_SNVs <- all_active_df %>% dplyr::filter(bp_diffs ==1) %>% 
+  rowwise() %>% 
+  mutate(SNP_pos  = find_SNP_pos(human, chimp)) %>% 
+  mutate(human_bp = unlist(str_split(human, pattern = ""))[SNP_pos], 
+         chimp_bp = unlist(str_split(chimp, pattern = ""))[SNP_pos], 
+         SNV_id = paste(chr, start+SNP_pos-16, human_bp, chimp_bp, sep = ":"), strand = "*", score2 = 0, start2 = start+SNP_pos-17, end2 = start+SNP_pos-16)
+
+#add activity in differential activity for enrichment testing
+all_active_df_SNVs$diff_activity <- "NO"
+all_active_df_SNVs$diff_activity[which(all_active_df_SNVs$SNP %in% all_emvars_df_SNVs$SNP)] <- "YES"
+#join human and chimp bps for easy comparisons
+all_active_df_SNVs <- all_active_df_SNVs %>% rowwise() %>% mutate(dna_pair = paste(human_bp, chimp_bp, sep =""))
+
+#identify transitions and transversions
+all_active_df_SNVs$dna_change <- "transversion"
+all_active_df_SNVs$dna_change[which(all_active_df_SNVs$dna_pair == "AG")] <- "transition"
+all_active_df_SNVs$dna_change[which(all_active_df_SNVs$dna_pair == "GA")] <- "transition"
+all_active_df_SNVs$dna_change[which(all_active_df_SNVs$dna_pair == "CT")] <- "transition"
+all_active_df_SNVs$dna_change[which(all_active_df_SNVs$dna_pair == "TC")] <- "transition"
+
+#test for enrichments
+transitions_transversions_table <- table(all_active_df_SNVs$dna_change, all_active_df_SNVs$diff_activity)
+fisher.test(transitions_transversions_table)
+
+#now add gorilla for polarization
+library(GenomicRanges) #for manipulating genomic regions
+library(GenomicFeatures) #for extracting DNA sequence for regions
+library(liftOver)
+library(BSgenome.Ggorilla.UCSC.gorGor6)
+
+# convert the peaks into a GRanges object
+SNV_cartilage_regions <- all_active_df_SNVs %>% 
+  dplyr::filter(chr %in% c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) %>% 
+  dplyr::select(chr, start, end, SNP) %>% 
+  makeGRangesFromDataFrame(keep.extra.columns = TRUE)
+
+#add labels which will allow us to pair liftover sequences to the human tile
+mcols(SNV_cartilage_regions)$SNP <- SNV_cartilage_regions$SNP
+
+#perform the lightover to GorGor5
+gorilla_SNV_cartilage_regions <- liftOver(x = SNV_cartilage_regions, chain = import.chain("~/Desktop/Polymorphisms_Project/LiftOver/Chains/hg38.gorGor6.all.chain")) %>% unlist()
+
+#convert results to df
+gorilla_SNV_cartilage_regions_df <- as.data.frame(gorilla_SNV_cartilage_regions)
+
+#get DNA sequences
+gorilla_seqs <- getSeq(BSgenome.Ggorilla.UCSC.gorGor6, gorilla_SNV_cartilage_regions)
+gorilla_SNV_cartilage_regions_df$seq <- as.character(gorilla_seqs)
+
+
+#liftover sometimes results in two or more alignments for a given human sequence due to an indel/chromosomal rearrangement, therefore, we need to stitch these regions back together
+
+#create variable to fill with the concatenated sequence
+gorilla_SNV_cartilage_regions_df$seq_concat <- NA
+gorilla_SNV_cartilage_regions_df$multi_chrom <- "NO"
+
+indels <- 0
+for (i in unique(gorilla_SNV_cartilage_regions_df$SNP)){
+  #get positions of matches
+  seq_block_positions <- which(gorilla_SNV_cartilage_regions_df$SNP == i)
+  
+  #first, process tiles which liftover to a single region of the chimp genome
+  if(length(seq_block_positions) == 1){
+    #set seq_concat equal to seq
+    gorilla_SNV_cartilage_regions_df$seq_concat[seq_block_positions] <- gorilla_SNV_cartilage_regions_df$seq[seq_block_positions]
+  }
+  if (length(seq_block_positions) > 1){
+  #keep track of number of regions which stitching required
+  indels <- indels + 1
+  
+  #check if there is a chromosomal rearrangement at this positons
+  if(length(unique(gorilla_SNV_cartilage_regions_df$seqnames[seq_block_positions])) == 1){
+    #stitch together sequences 
+    gorilla_SNV_cartilage_regions_df$seq_concat[seq_block_positions] <- paste(gorilla_SNV_cartilage_regions_df$seq[seq_block_positions], collapse  = "")
+    
+  }else{
+    #stitch together sequences 
+    gorilla_SNV_cartilage_regions_df$seq_concat[seq_block_positions] <- paste(gorilla_SNV_cartilage_regions_df$seq[seq_block_positions], collapse  = "")
+    gorilla_SNV_cartilage_regions_df$multi_chrom[seq_block_positions] <- "YES"
+  }
+}
+}
+
+#reduce set to combined sequences only (no duplicates)
+gorilla_SNV_cartilage_regions_df_reduced <- gorilla_SNV_cartilage_regions_df %>% dplyr::select(c(SNP, seq_concat, multi_chrom)) %>% distinct()
+names(gorilla_SNV_cartilage_regions_df_reduced)[2] <- "gorilla_seq"
+#merge human and chimp dataframes
+all_active_df_SNVs_gorilla <- merge(x = all_active_df_SNVs, y = gorilla_SNV_cartilage_regions_df_reduced, by = "SNP", all.x = T, suffixes = c("_hs", "_gorilla"))
+#remove adapters
+all_active_df_SNVs_gorilla$human_seqs <- gsub("ACTGGCCGCTTGACG", "", x = all_active_df_SNVs_gorilla$human)
+all_active_df_SNVs_gorilla$human_seqs <- gsub("CACTGCGGCTCCTGC", "", x = all_active_df_SNVs_gorilla$human_seqs)
+all_active_df_SNVs_gorilla$chimp_seqs <- gsub("ACTGGCCGCTTGACG", "", x = all_active_df_SNVs_gorilla$chimp)
+all_active_df_SNVs_gorilla$chimp_seqs <- gsub("CACTGCGGCTCCTGC", "", x = all_active_df_SNVs_gorilla$chimp_seqs)
+
+
+all_active_df_SNVs_gorilla <- all_active_df_SNVs_gorilla %>% dplyr::filter(!is.na(gorilla_seq)) %>% mutate(gorilla_bp = unlist(str_split(gorilla_seq, pattern = ""))[SNP_pos])
+
+all_active_df_SNVs_gorilla$anc_allele <- NA
+all_active_df_SNVs_gorilla$anc_allele[which(!is.na(all_active_df_SNVs_gorilla$gorilla_seq))] <- "unknown"
+all_active_df_SNVs_gorilla$anc_allele[which(all_active_df_SNVs_gorilla$human_bp == all_active_df_SNVs_gorilla$gorilla_bp)] <- "human"
+all_active_df_SNVs_gorilla$anc_allele[which(all_active_df_SNVs_gorilla$chimp_bp == all_active_df_SNVs_gorilla$gorilla_bp)] <- "chimp"
+
+table(all_active_df_SNVs_gorilla$anc_allele)
+
+all_active_df_SNVs_polarized <- all_active_df_SNVs_gorilla %>% dplyr::filter(anc_allele != "unknown")
+
+
+anc_SNV_table <- table(all_active_df_SNVs_polarized$diff_activity, all_active_df_SNVs_polarized$anc_allele)
+fisher.test(anc_SNV_table)
+
+# convert the peaks into a GRanges object
+SNV_cartilage_regions_emvars <- all_active_df_SNVs %>% 
+  mutate(SNP_start  = (start + SNP_pos -16)) %>% 
+  mutate(SNP_end = SNP_start) %>% 
+  dplyr::filter(chr %in% c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) %>% 
+  dplyr::select(chr, SNP_start, SNP_end, SNP) %>% rowwise() %>% 
+  dplyr::mutate(chr = gsub(chr, pattern = "chr", replacement = "")) %>% 
+  makeGRangesFromDataFrame(keep.extra.columns = TRUE)
+
+#add back unique row names
+mcols(SNV_cartilage_regions_emvars)$SNP <- all_active_df_SNVs %>% 
+  mutate(SNP_start  = (start + SNP_pos -16)) %>% 
+  mutate(SNP_end = SNP_start) %>% 
+  dplyr::filter(chr %in% c(paste("chr", 1:22, sep = ""), "chrX", "chrY")) %>% 
+  dplyr::select(chr, SNP_start, SNP_end, SNP) %>% rowwise() %>% 
+  dplyr::mutate(chr = gsub(chr, pattern = "chr", replacement = "")) %>% pull(SNP)
+
+#load packages 
+library(SNPlocs.Hsapiens.dbSNP155.GRCh38)
+
+#get rsids overlapping positoons
+snp_results <- snpsByOverlaps(SNPlocs.Hsapiens.dbSNP155.GRCh38, SNV_cartilage_regions_emvars)
+
+#convert to df and reformat for merging 
+snp_results_df <- as.data.frame(snp_results)
+snp_results_df$chr <-paste("chr", snp_results_df$seqnames, sep = "")
+snp_results_df$SNP_start <- snp_results_df$pos
+all_active_df_SNVs2 <- all_active_df_SNVs %>% rowwise() %>% 
+  mutate(SNP_start  = (start + SNP_pos -16))
+
+#add rsids overlaps to tiles df
+all_emvars_df_SNVs2 <- merge(x = all_active_df_SNVs2, snp_results_df, by =c("chr", "SNP_start"), all.x = T)
+
+#now get MAF information
+
+#load required package
+require(biomaRt)
+
+ensembl <- useMart("ENSEMBL_MART_SNP", dataset = "hsapiens_snp")
+
+#extract relevant SNP information
+snp_mafs <- getBM(attributes=c(
+  "refsnp_id", "chr_name", "chrom_start", "chrom_end",
+  "allele", "allele_1", "minor_allele",
+  "minor_allele_freq"),
+  filters="snp_filter", values=snp_results_df$RefSNP_id,
+  mart=ensembl, uniqueRows=TRUE) %>% dplyr::filter(chr_name %in% c(1:22, "X", "Y"))
+
+#rename column for merging 
+colnames(snp_mafs)[1] <- "RefSNP_id"
+
+#add snp data to dataframe of tiles 
+all_emvars_df_SNVs3  <- merge(x = all_emvars_df_SNVs2, 
+                              y = snp_mafs %>% dplyr::select(RefSNP_id, allele, minor_allele, minor_allele_freq), 
+                              by = "RefSNP_id", all.x = T)
+#remove x/y SNP
+all_emvars_df_SNVs3 <- all_emvars_df_SNVs3 [-2236,] 
+
+#count dif active regions with high minor allele freq
+all_emvars_df_SNVs3 %>% 
+  dplyr::filter(diff_activity == "YES") %>% 
+  dplyr::filter(minor_allele_freq > 0.01) %>% 
+  nrow()
+
+#count dif active regions with high minor allele freq and human and minor allele match
+all_emvars_df_SNVs3 %>% 
+  dplyr::filter(diff_activity == "YES") %>% 
+  dplyr::filter(minor_allele_freq > 0.01) %>% 
+  dplyr::filter(human_bp == minor_allele) %>% 
+  nrow()
+
+#compute statistical significance of polymorphism and diff activity association
+all_emvars_df_SNVs3$common_polymorphism <- "NONE"
+all_emvars_df_SNVs3$common_polymorphism[which(all_emvars_df_SNVs3$minor_allele_freq > 0.01)] <- "Polymorph"
+
+polymorph_table <- table(all_emvars_df_SNVs3$common_polymorphism, all_emvars_df_SNVs3$diff_activity)
+fisher.test(polymorph_table)
