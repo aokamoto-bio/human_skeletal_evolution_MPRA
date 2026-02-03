@@ -90,6 +90,18 @@ cartilage_metadata_experimental <- HARs_overlap %>%
   rename(c(V4 = "ID", V8 = "HARs_Overlapped")) %>% 
   left_join(x = cartilage_metadata_experimental)
 
+#overlap with CHARs
+CHARs_bed <- "~/Desktop/zooCHARs_hg38.bed"
+CHARs_overlap <- cartilage_metadata_experimental %>% 
+  dplyr::select(chr, start, end, SNP) %>% 
+  overlap_MPRA_with_bed_set(bed = CHARs_bed)
+
+#add CHAR overlap data
+cartilage_metadata_experimental <- CHARs_overlap %>% 
+  dplyr::select(V4, V8) %>% 
+  rename(c("SNP" = V4, "CHARs_Overlapped" = V8)) %>% 
+  left_join(x = cartilage_metadata_experimental)
+
 #overlap with hCONDELs
 hCONDELs_overlap <- cartilage_metadata_experimental %>% 
   dplyr::select(chr, start, end, ID) %>% 
