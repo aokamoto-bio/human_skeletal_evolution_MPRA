@@ -71,8 +71,8 @@ active_regions_count/total_regions_counts*100
 
 #total active regions per cell type
 (CHON_active_regions_count <- length(unique(CHON002_active$region)))
-(CHON_active_regions_count <- length(unique(CHON002_active$region)))
-(CHON_active_regions_count <- length(unique(CHON002_active$region)))
+(TC28_active_regions_count <- length(unique(TC28_active$region)))
+(K562_active_regions_count <- length(unique(K562_active$region)))
 
 #plot venn diagram to visualize active region sharing between cell types
 activity_venn <- ggVennDiagram(
@@ -975,3 +975,94 @@ activity_chimp_TF_venn <- ggVennDiagram(
   category.names = c("  CHON002" , "K562" , "TC28") 
 ) + 
   labs(fill = "TF Count")
+
+
+#add new activity figure 
+
+
+#create table for variables 
+emvars_df <- data.frame(celltype = c("CHON002", "K562", "TC28"),
+                        out_file = c("290k_CHON002_20250311.out", "290k_K562_20250311.out", "290k_TC28_20250311.out"),
+                        glm_file = c("290k_CHON002_emVAR_glm_20250311.out", "290k_K562_emVAR_glm_20250311.out", "290k_TC28_emVAR_glm_20250311.out"),
+                        active_controls = NA,
+                        neg_controls = NA)
+
+#iterate over cell type results data and extract control information
+for(i in 1:3){
+  temp_out_df <- read.table(emvars_df$out_file[i], header = T)
+  #get number of positive control pairs and calculate percent success
+  emvars_df$active_controls[i] <- temp_out_df %>% 
+    dplyr::filter(grepl("emVarCtrl", project)) %>% 
+    dplyr::filter(padj < 0.01) %>% 
+    dplyr::filter(abs(log2FoldChange) > 1) %>% 
+    dplyr::select(SNP) %>% unique() %>% nrow()/66*100
+  #get number of negative control pairs and calculate percent success
+  emvars_df$neg_controls[i] <- temp_out_df %>% 
+    dplyr::filter(grepl("negCtrl", project)) %>% 
+    dplyr::filter(padj < 0.01) %>% 
+    dplyr::filter(abs(log2FoldChange) > 1) %>% 
+    dplyr::select(SNP) %>% unique() %>% nrow()/71*100
+  
+}
+#cleanup results
+emvars_df$active_controls <- round(emvars_df$active_controls, digits = 1)
+
+active_plotting_df <- emvars_df %>% 
+  dplyr::select(celltype, active_controls, neg_controls) %>% pivot_longer(!celltype, names_to = "Set", values_to = "percent")
+active_plotting_df <- rbind(active_plotting_df, c("CHON002", "Experimental", CHON_active_regions_count/total_regions_counts*100))
+active_plotting_df <- rbind(active_plotting_df, c("TC28", "Experimental", TC28_active_regions_count/total_regions_counts*100))
+active_plotting_df <- rbind(active_plotting_df, c("K562", "Experimental", K562_active_regions_count/total_regions_counts*100))
+active_plotting_df$percent <- as.numeric(active_plotting_df$percent)
+
+#clean up set labels for plotting
+active_plotting_df$Set <- gsub(pattern = "active_controls", x = active_plotting_df$Set, replacement = "Positive Control")
+active_plotting_df$Set <- gsub(pattern = "neg_controls", x = active_plotting_df$Set, replacement = "Negative Control")
+
+active_plotting_df$Set <- factor(active_plotting_df$Set, levels = c("Negative Control", "Positive Control", "Experimental"))
+
+activity_plot <- ggplot(active_plotting_df, aes(x = Set, y = percent, fill = Set)) + 
+  geom_bar(stat = "identity") + 
+  facet_wrap(~celltype) + 
+  labs(x = NULL, y = "Percent Active", fill = NULL) + 
+  theme_classic() + 
+  scale_fill_manual(values = c("#CECECE", "#7D7D7D","#000000"))+
+  theme(axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(), 
+        legend.position = "bottom")
+
+active_plotting_df <- emvars_df %>% 
+  dplyr::select(celltype, active_controls, neg_controls) %>% pivot_longer(!celltype, names_to = "Set", values_to = "percent")
+active_plotting_df <- rbind(active_plotting_df, c("CHON002", "Experimental", CHON_active_regions_count/total_regions_counts*100))
+active_plotting_df <- rbind(active_plotting_df, c("TC28", "Experimental", TC28_active_regions_count/total_regions_counts*100))
+active_plotting_df <- rbind(active_plotting_df, c("K562", "Experimental", K562_active_regions_count/total_regions_counts*100))
+active_plotting_df$percent <- as.numeric(active_plotting_df$percent)
+
+
+emvar_plotting_df <- data.frame(
+  celltype = c("CHON002", "K562", "TC28"), 
+  Percent = c(length(unique(CHON002_emVars$region))/CHON_active_regions_count*100, 
+              length(unique(K562_emVars$region))/K562_active_regions_count*100,
+              length(unique(TC28_emVars$region))/TC28_active_regions_count*100)
+  )
+
+emvar_plot <- ggplot(emvar_plotting_df, aes(x = celltype, y = Percent)) + 
+  geom_bar(stat = "identity") + 
+  labs(x = NULL, y = "Percent Differentally Active") + 
+  theme_classic() # + 
+  #scale_fill_manual(values = c("#CECECE", "#7D7D7D","#000000"))+
+  #theme(axis.text.x = element_blank(), 
+  #      axis.ticks.x = element_blank())
+
+activity_summary <- ggdraw() +
+  draw_plot(activity_plot , x = 0, y = 0, width = 0.65, height = 1) +
+  draw_plot(emvar_plot, x = 0.65, y = 0, width = 0.35, height = 1) +
+  draw_plot_label(label = c("A", "B"), 
+                  size = 10,
+                  x = c(0, 0.65), 
+                  y = c(1, 1))  + 
+  bgcolor("white")
+
+ggsave(plot = activity_summary , 
+       filename = "~/Dropbox/Cartilage MPRA Paper/Code/fig2_activity_summary_plot.png", 
+       device = "png", dpi = 300, height = 3.5, width = 6.5, units = "in")
+
