@@ -979,6 +979,31 @@ activity_chimp_TF_venn <- ggVennDiagram(
 
 #add new activity figure 
 
+#load active pairs for each cell type
+CHON002_active_all <- read.table("~/Desktop/Capellini_Lab/S13 CHON Activity.txt", header = T) 
+CHON002_active_all$cell_type <- "CHON"
+TC28_active_all <- read.table("~/Desktop/Capellini_Lab/S14 TC28 Activity.txt", header = T) 
+TC28_active_all$cell_type <- "TC28"
+K562_active_all <- read.table("~/Desktop/Capellini_Lab/S15 K562 Activity.txt", header = T) 
+K562_active_all$cell_type <- "K562"
+
+active_all <- rbind(CHON002_active_all, TC28_active_all, K562_active_all) 
+
+dodge <- position_dodge(width = 1)
+
+activity_lfc <- ggplot(data = active_all, aes(x = ctrl_exp, y = log2FoldChange, fill = cell_type)) + 
+  geom_violin(position = dodge) + 
+  geom_boxplot(aes(group=interaction(cell_type, ctrl_exp)), fill = "white", outliers = F, position = dodge, width = 0.1) +
+  labs(x = NULL, y = "log2 Fold Change") + 
+  #theme_classic() + 
+  scale_x_discrete(labels= c("Positive Control", "Negative Control", "Experimental")) + 
+  scale_fill_manual(values = c("#0B9DD5", "#EA7131", "#4DA847")) + 
+  theme(legend.position = "right",
+        #legend.margin = margin(2, 2, 2, 2),
+        #legend.direction = "horizontal",
+        panel.grid.major.x = element_blank()
+  ) +
+  guides(fill=guide_legend(title="Cell Type"))
 
 #create table for variables 
 emvars_df <- data.frame(celltype = c("CHON002", "K562", "TC28"),
@@ -1043,26 +1068,25 @@ emvar_plotting_df <- data.frame(
   Percent = c(length(unique(CHON002_emVars$region))/CHON_active_regions_count*100, 
               length(unique(K562_emVars$region))/K562_active_regions_count*100,
               length(unique(TC28_emVars$region))/TC28_active_regions_count*100)
-  )
+)
 
-emvar_plot <- ggplot(emvar_plotting_df, aes(x = celltype, y = Percent)) + 
+emvar_plot <- ggplot(emvar_plotting_df, aes(x = celltype, y = Percent, fill =celltype)) + 
   geom_bar(stat = "identity") + 
   labs(x = NULL, y = "Percent Differentally Active") + 
-  theme_classic() # + 
-  #scale_fill_manual(values = c("#CECECE", "#7D7D7D","#000000"))+
-  #theme(axis.text.x = element_blank(), 
-  #      axis.ticks.x = element_blank())
+  theme_classic()  + 
+  scale_fill_manual(values = c("#0B9DD5", "#EA7131", "#4DA847")) + 
+  guides(fill="none")
 
 activity_summary <- ggdraw() +
-  draw_plot(activity_plot , x = 0, y = 0, width = 0.65, height = 1) +
-  draw_plot(emvar_plot, x = 0.65, y = 0, width = 0.35, height = 1) +
-  draw_plot_label(label = c("A", "B"), 
+  draw_plot(activity_lfc , x = 0, y = 0.5, width = 1, height = 0.5) +
+  draw_plot(activity_plot, x = 0, y = 0, width = 0.65, height = 0.5) +
+  draw_plot(emvar_plot, x = 0.65, y = 0, width = 0.35, height = 0.5) +
+  draw_plot_label(label = c("A", "B", "C"), 
                   size = 10,
-                  x = c(0, 0.65), 
-                  y = c(1, 1))  + 
+                  x = c(0, 0, 0.65), 
+                  y = c(1, 0.5, 0.5))  + 
   bgcolor("white")
 
 ggsave(plot = activity_summary , 
-       filename = "~/Dropbox/Cartilage MPRA Paper/Code/fig2_activity_summary_plot.png", 
-       device = "png", dpi = 300, height = 3.5, width = 6.5, units = "in")
-
+       filename = "~/Dropbox/Cartilage MPRA Paper/Code/fig2_activity_summary_plot.pdf", 
+       device = "pdf", dpi = 300, height = 8.5, width = 8.5, units = "mm")
